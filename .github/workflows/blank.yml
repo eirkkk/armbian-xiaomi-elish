@@ -10,22 +10,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+
       - name: Get time
         id: time
         uses: nanzm/get-time-action@v1.1
         with:
           format: 'YYYYMMDD-HHmm'
-      - name: Create empty release
+
+      - name: Create GitHub release manually
         id: release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.time.outputs.time }}
-          body_path: README.md
-          token: ${{ secrets.GITHUB_TOKEN }}
-          target_commitish: master
-          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.time.outputs.time }}
+        run: |
+          echo "Creating release with tag: $TAG"
+          release_json=$(gh release create "$TAG" README.md --target master --draft=false --title "$TAG" --notes-file README.md --json id -q .)
+          release_id=$(echo "$release_json" | jq -r .id)
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
     outputs:
-      release_id: ${{ steps.release.outputs.id }}
+      release_id: ${{ steps.release.outputs.release_id }}
+
   build:
     runs-on: ubuntu-latest
     needs: prepare_release
@@ -34,15 +39,22 @@ jobs:
         BOARD: [xiaomi-elish, oneplus-kebab]
         DISTRO: [armbian]
         FLAVOR: [ubuntu]
-        BRANCH: [current]
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+
+      - name: Setup QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+          sudo update-binfmts --enable qemu-arm
+          sudo update-binfmts --enable qemu-aarch64
+          sudo update-binfmts --enable qemu-riscv64 || true
+
       - name: Upload Armbian image
         uses: amazingfate/armbian-compile-action@main
         if: matrix.DISTRO == 'armbian'
         with:
-          branch: ${{ matrix.BRANCH }}
           board: ${{ matrix.BOARD }}
           flavor: ${{ matrix.FLAVOR }}
           release-id: ${{ needs.prepare_release.outputs.release_id }}
